@@ -159,6 +159,12 @@ div.plan{white-space:pre-wrap;text-align:start;margin:6px 0 4px;padding:8px 10px
 .install span{font-size:13px;color:var(--muted)}
 .settings{display:flex;flex-direction:column;gap:12px}
 .pend{color:var(--yellow);font-weight:700}
+.pastebtn{font:inherit;text-align:start;display:flex;flex-direction:column;gap:2px;width:100%;padding:12px 14px;border:1.5px dashed color-mix(in srgb,var(--blue) 55%,var(--line));border-radius:12px;background:color-mix(in srgb,var(--blue) 6%,var(--surface));color:var(--ink);cursor:pointer}
+.pastebtn span{font-size:12px;color:var(--muted)}
+.pastebox{display:flex;flex-direction:column;gap:8px;padding:12px;border:1.5px solid color-mix(in srgb,var(--blue) 45%,var(--line));border-radius:12px;background:var(--surface)}
+.pastebox textarea{min-height:120px;font-size:15px}
+.howto{font-size:13px;color:var(--muted)} .howto summary{cursor:pointer;color:var(--blue)} .howto p{margin:6px 0}
+.banner.ok{background:color-mix(in srgb,var(--green) 14%,var(--surface));border-color:color-mix(in srgb,var(--green) 50%,var(--line))}
 .members .dot{font-size:14px;color:var(--yellow)!important}
 .members .dot.on{color:var(--green)!important}
 .members .dot.off{color:var(--line)!important}
@@ -514,6 +520,7 @@ function drawLog(){
     ${d.restored?`<div class="banner row" style="justify-content:space-between">המשכתי מאיפה שעצרת. <button type="button" class="linkbtn" data-act="fresh">להתחיל מחדש</button></div>`:""}
     ${d.copiedFrom&&!lock?`<div class="banner">על בסיס האימון של ${esc(nameOf(d.copiedFrom.userId))}. המשקלים שלו מולאו מראש. עדכן למה שאתה עשית.</div>`:""}
     ${d.fromMine?`<div class="banner">מולא לפי הפעם הקודמת. שנה רק מה שהשתנה.</div>`:""}
+    ${!lock?pasteBox():""}${d.pasteInfo?`<div class="banner ok" role="status">${esc(d.pasteInfo)}</div>`:""}
     <div class="seg">${fmtBtns}</div>
     <label class="f">שם האימון${d.format==="strength"?" (לא חובה)":""}<input id="f-title" value="${esc(d.title)}" placeholder="${d.format==="strength"?"למשל: רגליים / Push day":"למשל: Fran / מטקון של שישי"}" ${lock?"readonly":""}></label>
     ${body}
@@ -539,7 +546,7 @@ function autofillEx(x){
   const ex=draft.exercises[x];const lt=lastTime(ex.name);
   if(!lt){ex.last="";return false}
   const sets=lt.e.sets;
-  ex.last=`פעם קודמת, ${ago(lt.at)}: ${setsLine(lt.e)}`;
+  ex.last=`פעם קודמת, ${ago(lt.at)}: <span class="num">${setsLine(lt.e)}</span>`;
   const untouched=!ex.detail&&!ex.reps&&!ex.kg;
   if(untouched){const f=fromSets(ex.name,sets);Object.assign(ex,{detail:f.detail,n:f.n,reps:f.reps,kg:f.kg,sets:f.sets});}
   return untouched;
@@ -671,6 +678,10 @@ document.addEventListener("click",e=>{
   else if(a==="log")openLog(null);
   else if(a==="logwod")openLog(currentWod());
   else if(a==="newwod")openNewWod();
+  else if(a==="pasteopen"){readDraft();draft.pasteOpen=true;drawLog();const ta=$("#f-paste");if(ta)ta.focus()}
+  else if(a==="pasteclose"){readDraft();draft.pasteOpen=false;drawLog()}
+  else if(a==="pasteapply")applyPaste();
+  else if(a==="pasteclip")pasteFromClipboard();
   else if(a==="logout")logout();
   else if(a==="rename")renameMe();
   else if(a==="newpass")changePassword();
@@ -698,6 +709,112 @@ document.addEventListener("input",e=>{if(!draft||!e.target.closest("#logForm"))r
 document.addEventListener("submit",e=>{e.preventDefault();if(e.target.id==="logForm")saveWorkout();else if(e.target.id==="wodForm")saveWod();else if(e.target.id==="authForm")submitAuth()});
 window.addEventListener("offline",()=>render());
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#sheetHost").innerHTML)closeSheet()});
+
+/* ---------- paste a workout as text (e.g. copied from a screenshot) ---------- */
+// Turns free text like "Back squat 5x5 @100kg" or "AMRAP 20: 5 pull-ups..." into a draft.
+// Rule-based on purpose: free, offline, and nothing leaves the phone.
+const KG_RE=/(\d+(?:[.,]\d+)?)\s*(kg|kgs|ק"ג|ק״ג|קג|קילו|lbs?|#)/i;
+function toKg(n,unit){let v=parseFloat(String(n).replace(",","."));if(/lb|#/i.test(unit||""))v=Math.round(v*0.4536*2)/2;return v}
+function cleanName(s){
+  return s.replace(/^\s*(?:[-•*·▪►>]+|\(?[a-zא-ת]\d?\)|\d{1,2}[.)])\s*/i,"")   // bullets, "A1)", "1."
+    .replace(/\d+\s*[x×*]\s*\d+(?:\s*[x×*]\s*\d+(?:[.,]\d+)?)?/gi," ")
+    .replace(/\d+\s*(?:sets?|סטים|סט)\s*(?:of|של|x|×)?\s*\d*/gi," ")
+    .replace(/\b\d+(?:\s*[-/]\s*\d+){2,}\b/g," ")
+    .replace(new RegExp(KG_RE.source,"gi")," ").replace(/@\s*\d+(?:[.,]\d+)?\s*%?/g," ")
+    .replace(/(^|\s)(?:reps?|חזרות|kgs?|lbs?|ק"ג|ק״ג|קג|[@x×*%])(?=\s|$)/gi," ")
+    .replace(/[\s:–—\-,|]+$/,"").replace(/^[\s:–—\-,|]+/,"")
+    .replace(/\s{2,}/g," ").trim();
+}
+// one line -> {name, sets:[{reps,kg}]} or null
+function parseStrengthLine(line){
+  const L=line.replace(/[–—]/g,"-");
+  let kg=0;const km=L.match(KG_RE);if(km)kg=toKg(km[1],km[2]);
+  const at=L.match(/@\s*(\d+(?:[.,]\d+)?)(?![\d.,]*\s*%)/);if(!km&&at)kg=toKg(at[1]);
+  let sets=null;
+  let m=L.match(/(\d+)\s*[x×*]\s*(\d+)(?:\s*[x×*]\s*(\d+(?:[.,]\d+)?))?/i);         // 5x5, 4x8x70
+  if(m){const a=+m[1],b=+m[2];if(m[3]&&!kg)kg=toKg(m[3]);
+    // sets x reps (the usual convention); only flip when the first number can't be a set count
+    const n=a<=12?a:b,reps=a<=12?b:a;
+    sets=Array.from({length:Math.min(n,12)},()=>({reps,kg}))}
+  if(!sets){m=L.match(/(\d+)\s*(?:sets?|סטים|סט)\s*(?:of|של|x|×)?\s*(\d+)/i);
+    if(m)sets=Array.from({length:Math.min(+m[1],12)},()=>({reps:+m[2],kg}))}
+  if(!sets){m=L.match(/\b(\d+(?:\s*[-/]\s*\d+){2,})\b/);                                  // 5-5-3-3-1 or 5/3/1
+    if(m){const reps=m[1].split(/[-/]/).map(x=>+x.trim());
+      let kgs=null;const w=L.slice(m.index+m[0].length).match(/(\d+(?:[.,]\d+)?(?:\s*[-/]\s*\d+(?:[.,]\d+)?){1,})\s*(kg|ק"ג|lbs?)?/i);
+      if(w){const ks=w[1].split(/[-/]/).map(x=>toKg(x,w[2]));if(ks.length===reps.length)kgs=ks}
+      sets=reps.map((r,i)=>({reps:r,kg:kgs?kgs[i]:kg}))}}
+  const name=cleanName(L);
+  if(!sets)return name?{name,sets:null}:null;
+  return{name,sets};
+}
+function parseWorkoutText(raw){
+  const lines=String(raw||"").replace(/\r/g,"").split("\n").map(s=>s.replace(/\s+$/,"")).filter(s=>s.trim());
+  if(!lines.length)return null;
+  const all=lines.join("\n");
+  const amrap=all.match(/amrap|as many rounds|כמה שיותר סבבים|כמה שיותר סיבובים/i);
+  const forTime=/for time|\brft\b|rounds for time|על זמן|לזמן|נגד השעון|\b\d+(?:\s*-\s*\d+){2,}\b\s*$/im.test(all)&&!/[x×*]\s*\d/.test(all);
+  const isHeader=s=>/^\s*(amrap|for time|rft|emom|e\d+mom|every|\d+\s*rounds?|time cap|cap|כמה שיותר|סבבים|על זמן)/i.test(s)||/(amrap|for time)\s*[:\-]?\s*$/i.test(s);
+  if(amrap||forTime){
+    const fmt=amrap?"amrap":"time";
+    let minutes=null;
+    const mm=all.match(/amrap\s*(?:of|in|-|:)?\s*(\d{1,3})|(\d{1,3})\s*(?:min(?:ute)?s?|'|דק(?:ות|')?)\s*amrap|amrap[^\n]{0,20}?(\d{1,3})\s*(?:min|'|דק)/i);
+    if(mm)minutes=+(mm[1]||mm[2]||mm[3]);
+    if(!minutes&&fmt==="time"){const cap=all.match(/(?:time\s*cap|cap|קאפ)\s*[:\-]?\s*(\d{1,3})/i);if(cap)minutes=null}
+    let title="";const first=lines[0].trim();
+    if(!isHeader(first)&&!/\d/.test(first)&&lines.length>1&&first.length<=40)title=first.replace(/^["'“”״׳]+|["'“”״׳]+$/g,"").trim();
+    const amrapHead=/^\s*(?:\d{1,3}\s*(?:min\w*|'|דק\S*)\s*)?amrap(?:\s*(?:of|in)?\s*\d{0,3}\s*(?:min\w*|'|דק\S*)?)?\s*[:\-]?\s*$/i;
+    const body=lines.filter((l,i)=>!(i===0&&title)).filter(l=>!(fmt==="amrap"&&amrapHead.test(l)));
+    return{format:fmt,title,plan:body.join("\n").trim(),amrapMin:minutes?String(minutes):"",exercises:null,found:body.length};
+  }
+  // strength: one exercise per line; a name line followed by a numbers-only line is merged
+  const out=[];let title="";
+  for(let i=0;i<lines.length;i++){
+    const p=parseStrengthLine(lines[i]);if(!p)continue;
+    if(!p.sets){
+      const nx=lines[i+1]?parseStrengthLine(lines[i+1]):null;
+      if(nx&&nx.sets&&!nx.name){out.push({name:p.name,sets:nx.sets});i++;continue}
+      if(nx&&nx.sets&&nx.name&&!out.length&&!title&&i===0){title=p.name;continue}
+      if(i===0&&!title){title=p.name;continue}
+      out.push({name:p.name,sets:[]});continue;
+    }
+    if(!p.name&&out.length&&!out[out.length-1].sets.length){out[out.length-1].sets=p.sets;continue}
+    out.push({name:p.name||"תרגיל",sets:p.sets});
+  }
+  const ex=out.filter(e=>e.name).slice(0,8);
+  if(!ex.length)return{format:"time",title:"",plan:all.trim(),amrapMin:"",exercises:null,found:0,unsure:true};
+  return{format:"strength",title,plan:"",amrapMin:"",exercises:ex,found:ex.length};
+}
+function pasteBox(){
+  if(!draft.pasteOpen)return`<button type="button" class="pastebtn" data-act="pasteopen"><b>הדבק אימון כטקסט</b><span>מצילום מסך, וואטסאפ או אינסטגרם. האפליקציה תמלא את הטופס.</span></button>`;
+  return`<div class="pastebox">
+    <label class="f">מדביקים כאן את הטקסט של האימון<textarea id="f-paste" dir="auto" placeholder="לדוגמה:&#10;סקוואט אחורי 5x5 100kg&#10;לחיצת חזה 4x8 70kg&#10;Pull-ups 3x10">${esc(draft.pasteText||"")}</textarea></label>
+    <div class="row" style="gap:8px"><button type="button" class="btn small" data-act="pasteapply">מלא את הטופס</button><button type="button" class="btn ghost small" data-act="pasteclip">הדבק מהלוח</button><button type="button" class="linkbtn" data-act="pasteclose">ביטול</button></div>
+    <details class="howto"><summary>איך מעתיקים טקסט מצילום מסך?</summary>
+      <p><b>אייפון:</b> פותחים את התמונה בגלריה, לוחצים לחיצה ארוכה על הטקסט, בוחרים "בחר הכל" ואז "העתק".</p>
+      <p><b>אנדרואיד:</b> פותחים את התמונה ב-Google Photos, לוחצים על Lens, בוחרים "טקסט", "בחר הכל" ואז "העתק".</p>
+    </details>
+  </div>`;
+}
+function applyPaste(){
+  const ta=$("#f-paste");const text=ta?ta.value:"";draft.pasteText=text;
+  if(!text.trim()){toast("אין טקסט להמרה");return}
+  readDraft();
+  const r=parseWorkoutText(text);
+  if(!r){toast("לא הצלחתי לזהות אימון בטקסט");return}
+  draft.format=r.format;
+  if(r.title)draft.title=r.title;
+  if(r.format==="strength"){
+    draft.exercises=r.exercises.map(e=>{const x=e.sets&&e.sets.length?fromSets(e.name,e.sets):Object.assign(newEx(),{name:e.name});return x});
+    draft.exercises.forEach((_,i)=>autofillEx(i));
+  }else{draft.plan=r.plan;if(r.amrapMin)draft.amrapMin=r.amrapMin}
+  draft.pasteOpen=false;
+  draft.pasteInfo=r.unsure?"לא זיהיתי תרגילי כוח, אז הכנסתי את הטקסט כאימון For Time. אם זה לא נכון, בחר סוג אחר למעלה.":r.format==="strength"?`זיהיתי ${r.found===1?"תרגיל אחד":r.found+" תרגילים"}. בדוק את המספרים לפני השמירה.`:`זיהיתי אימון ${FMT[r.format].he}${r.amrapMin?` של ${r.amrapMin} דקות`:""}. מלא את התוצאה שלך ושמור.`;
+  drawLog();
+}
+async function pasteFromClipboard(){
+  try{const t=await navigator.clipboard.readText();if(t){draft.pasteText=t;const ta=$("#f-paste");if(ta)ta.value=t;return}}catch(e){}
+  toast("לחץ לחיצה ארוכה בתיבה ובחר 'הדבק'");const ta=$("#f-paste");if(ta)ta.focus();
+}
 
 /* ---------- loading data from Supabase ---------- */
 function fromRow(r){
