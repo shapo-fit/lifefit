@@ -748,32 +748,53 @@ function parseStrengthLine(line){
   return{name,sets};
 }
 function parseWorkoutText(raw){
-  const lines=String(raw||"").replace(/\r/g,"").split("\n").map(s=>s.replace(/\s+$/,"")).filter(s=>s.trim());
+  const rawLines=String(raw||"").replace(/\r/g,"").split("\n").map(s=>s.replace(/\s+$/,""));
+  const lines=rawLines.filter(s=>s.trim());
   if(!lines.length)return null;
   const all=lines.join("\n");
-  const amrap=all.match(/amrap|as many rounds|כמה שיותר סבבים|כמה שיותר סיבובים/i);
-  const forTime=/for time|\brft\b|rounds for time|על זמן|לזמן|נגד השעון|\b\d+(?:\s*-\s*\d+){2,}\b\s*$/im.test(all)&&!/[x×*]\s*\d/.test(all);
-  const isHeader=s=>/^\s*(amrap|for time|rft|emom|e\d+mom|every|\d+\s*rounds?|time cap|cap|כמה שיותר|סבבים|על זמן)/i.test(s)||/(amrap|for time)\s*[:\-]?\s*$/i.test(s);
-  if(amrap||forTime){
+  const isHeader=s=>/^\s*(amrap|for time|rft|emom|e\d+mom|every|tabata|\d+\s*rounds?|time cap|cap|work|כמה שיותר|סבבים|סיבובים|על זמן)/i.test(s)||/(amrap|for time)\s*[:\-]?\s*$/i.test(s);
+  const amrap=/amrap|as many rounds|כמה שיותר סבבים|כמה שיותר סיבובים/i.test(all);
+  const metconWords=/for time|\brft\b|rounds?\b|סבבים|סיבובים|על זמן|לזמן|נגד השעון|emom|e\d+mom|every\s+\d|tabata|time cap|\bcap\b|קאפ|rest\s+\d|מנוחה|\bcals?\b|קלוריות|\b\d{1,2}:\d{2}\b/i.test(all);
+  // strength lines carry a sets scheme (5x5, 4 sets of 8, 5/3/1); metcon lines start with a rep count ("21 KB swings")
+  const parsed=lines.map(parseStrengthLine);
+  const withSets=parsed.filter(p=>p&&p.sets&&p.sets.length).length;
+  const repsFirst=lines.filter(l=>/^\s*\d+\s*(?:x\s*)?[a-zA-Zא-ת]/.test(l)&&!/\d\s*[x×*]\s*\d/.test(l)).length;
+  const strengthLike=withSets>=2||(withSets>=1&&withSets>=repsFirst);
+  const explicitTime=/for time|\brft\b|על זמן|לזמן|נגד השעון/i.test(all);
+  if(amrap||explicitTime||(!strengthLike&&(metconWords||repsFirst>=2))||(!strengthLike&&!withSets)){
     const fmt=amrap?"amrap":"time";
     let minutes=null;
     const mm=all.match(/amrap\s*(?:of|in|-|:)?\s*(\d{1,3})|(\d{1,3})\s*(?:min(?:ute)?s?|'|דק(?:ות|')?)\s*amrap|amrap[^\n]{0,20}?(\d{1,3})\s*(?:min|'|דק)/i);
     if(mm)minutes=+(mm[1]||mm[2]||mm[3]);
-    if(!minutes&&fmt==="time"){const cap=all.match(/(?:time\s*cap|cap|קאפ)\s*[:\-]?\s*(\d{1,3})/i);if(cap)minutes=null}
-    let title="";const first=lines[0].trim();
-    if(!isHeader(first)&&!/\d/.test(first)&&lines.length>1&&first.length<=40)title=first.replace(/^["'“”״׳]+|["'“”״׳]+$/g,"").trim();
+    let title="";const first=lines[0].trim();let firstIsTitle=false;
+    if(!/\d/.test(first)&&lines.length>1&&first.length<=40&&!/^(for time|amrap|emom|tabata)\b/i.test(first)){title=first.replace(/^["'“”״׳]+|["'“”״׳]+[:]?$/g,"").replace(/:$/,"").trim();firstIsTitle=true}
     const amrapHead=/^\s*(?:\d{1,3}\s*(?:min\w*|'|דק\S*)\s*)?amrap(?:\s*(?:of|in)?\s*\d{0,3}\s*(?:min\w*|'|דק\S*)?)?\s*[:\-]?\s*$/i;
-    const body=lines.filter((l,i)=>!(i===0&&title)).filter(l=>!(fmt==="amrap"&&amrapHead.test(l)));
-    return{format:fmt,title,plan:body.join("\n").trim(),amrapMin:minutes?String(minutes):"",exercises:null,found:body.length};
+    // keep the original layout (blank lines between blocks), minus the title line and a bare "AMRAP 20" header
+    let skippedTitle=false;
+    const body=rawLines.filter(l=>{
+      if(firstIsTitle&&!skippedTitle&&l.trim()){skippedTitle=true;return false}
+      return !(fmt==="amrap"&&amrapHead.test(l));
+    }).join("\n").replace(/\n{3,}/g,"\n\n").trim();
+    const rounds=all.match(/(\d+)\s*(?:rounds?|סבבים|סיבובים)/i);
+    // a generic header ("Work", "WOD") or no header at all: name it after the movements instead
+    const generic=/^(work|wod|metcon|workout|conditioning|part\s*[a-z\d]|אימון|מטקון)$/i;
+    if(!title||generic.test(title)){
+      const moves=lines.filter(l=>/^\s*\d+\s*(?:x\s*)?(?:cals?\s+|m\s+)?[a-zA-Zא-ת]/.test(l)&&!/rounds?|סבבים|rest|מנוחה/i.test(l))
+        .map(l=>/^\s*\d+\s*(?:m|km|cals?|kcal)\b/i.test(l)?l.trim():l.replace(/^\s*\d+\s*(?:x\s*)?/,""))
+        .map(l=>l.replace(KG_RE,"").replace(/\s{2,}/g," ").trim()).filter(Boolean).slice(0,3);
+      if(moves.length)title=((rounds?`${rounds[1]} סבבים: `:"")+moves.join(" · ")).slice(0,80);
+    }
+    return{format:fmt,title,plan:body,amrapMin:minutes?String(minutes):"",exercises:null,found:lines.length,
+      guessed:!amrap&&!/for time|\brft\b|על זמן|לזמן|נגד השעון/i.test(all),rounds:rounds?+rounds[1]:null,
+      special:/emom|e\d+mom|every\s+\d|tabata/i.test(all)};
   }
   // strength: one exercise per line; a name line followed by a numbers-only line is merged
   const out=[];let title="";
   for(let i=0;i<lines.length;i++){
-    const p=parseStrengthLine(lines[i]);if(!p)continue;
+    const p=parsed[i];if(!p)continue;
     if(!p.sets){
-      const nx=lines[i+1]?parseStrengthLine(lines[i+1]):null;
+      const nx=parsed[i+1]||null;
       if(nx&&nx.sets&&!nx.name){out.push({name:p.name,sets:nx.sets});i++;continue}
-      if(nx&&nx.sets&&nx.name&&!out.length&&!title&&i===0){title=p.name;continue}
       if(i===0&&!title){title=p.name;continue}
       out.push({name:p.name,sets:[]});continue;
     }
@@ -781,8 +802,7 @@ function parseWorkoutText(raw){
     out.push({name:p.name||"תרגיל",sets:p.sets});
   }
   const ex=out.filter(e=>e.name).slice(0,8);
-  if(!ex.length)return{format:"time",title:"",plan:all.trim(),amrapMin:"",exercises:null,found:0,unsure:true};
-  return{format:"strength",title,plan:"",amrapMin:"",exercises:ex,found:ex.length};
+  return{format:"strength",title,plan:"",amrapMin:"",exercises:ex,found:ex.length,missing:ex.filter(e=>!e.sets.length).length};
 }
 function pasteBox(){
   if(!draft.pasteOpen)return`<button type="button" class="pastebtn" data-act="pasteopen"><b>הדבק אימון כטקסט</b><span>מצילום מסך, וואטסאפ או אינסטגרם. האפליקציה תמלא את הטופס.</span></button>`;
@@ -808,7 +828,10 @@ function applyPaste(){
     draft.exercises.forEach((_,i)=>autofillEx(i));
   }else{draft.plan=r.plan;if(r.amrapMin)draft.amrapMin=r.amrapMin}
   draft.pasteOpen=false;
-  draft.pasteInfo=r.unsure?"לא זיהיתי תרגילי כוח, אז הכנסתי את הטקסט כאימון For Time. אם זה לא נכון, בחר סוג אחר למעלה.":r.format==="strength"?`זיהיתי ${r.found===1?"תרגיל אחד":r.found+" תרגילים"}. בדוק את המספרים לפני השמירה.`:`זיהיתי אימון ${FMT[r.format].he}${r.amrapMin?` של ${r.amrapMin} דקות`:""}. מלא את התוצאה שלך ושמור.`;
+  if(r.format==="strength")draft.pasteInfo=`זיהיתי ${r.found===1?"תרגיל אחד":r.found+" תרגילים"}${r.missing?`, ב-${r.missing} מהם חסרים סטים וחזרות`:""}. בדוק את המספרים לפני השמירה.`;
+  else if(r.special)draft.pasteInfo="זה אימון EMOM או טבטה. שמרתי אותו כ-For Time עם התיאור המלא. בתוצאה רשום את הזמן הכולל, או סמן שלא סיימת.";
+  else if(r.format==="amrap")draft.pasteInfo=`זיהיתי AMRAP${r.amrapMin?` של ${r.amrapMin} דקות`:""}. מלא כמה סבבים עשית ושמור.`;
+  else draft.pasteInfo=`זיהיתי אימון לזמן${r.rounds?` של ${r.rounds} סבבים`:""}. מלא את זמן הסיום שלך ושמור.${r.guessed?" אם זה בעצם AMRAP, בחר AMRAP למעלה.":""}`;
   drawLog();
 }
 async function pasteFromClipboard(){
