@@ -7,8 +7,8 @@
 <meta name="description" content="רושמים אימונים, משתפים ולומדים אחד מהשני">
 <meta name="theme-color" content="#C8243A">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/favicon.png" type="image/png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="הלוח">
@@ -753,7 +753,7 @@ function showAuth(mode,msg){
   const join=authMode==="join";
   $("#gate").hidden=false;
   $("#gate").innerHTML=`<div class="gatebox">
-    <img src="icons/icon-192.png" alt="" width="72" height="72" class="gateicon">
+    <img src="icon-192.png" alt="" width="72" height="72" class="gateicon">
     <h1 class="brand">הלוח של החבר'ה</h1>
     <p class="gatesub">${join?"עוד צעד אחד: הצטרפות לקבוצה.":"רושמים אימונים, משתפים ולומדים אחד מהשני."}</p>
     ${join?"":`<div class="seg two" role="tablist"><button type="button" aria-pressed="${authMode==="login"}" data-auth="login">כניסה</button><button type="button" aria-pressed="${authMode==="signup"}" data-auth="signup">הרשמה</button></div>`}

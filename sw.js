@@ -1,15 +1,20 @@
 // Service worker: lets the app open without reception and loads fast.
 // Bump VERSION whenever you upload a new version, so phones pick it up.
-const VERSION = "v2";
+const VERSION = "v4";
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = `runtime-${VERSION}`;
 const SHELL_FILES = [
   "./", "./index.html", "./config.js", "./manifest.webmanifest",
-  "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png", "./icons/favicon.png"
+  "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png", "./favicon.png"
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));
+  // each file is cached on its own, so one missing file never blocks the whole install
+  e.waitUntil(
+    caches.open(SHELL)
+      .then((c) => Promise.all(SHELL_FILES.map((f) => c.add(f).catch(() => {}))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (e) => {
@@ -31,7 +36,8 @@ self.addEventListener("fetch", (e) => {
   // The app itself: try the network first (to get updates), fall back to the saved copy offline.
   if (url.origin === self.location.origin) {
     e.respondWith(
-      fetch(req)
+      // "no-cache" asks GitHub whether the file changed, instead of reusing the browser's copy for 10 minutes
+      fetch(req, { cache: "no-cache" })
         .then((res) => {
           if (res.ok) { const copy = res.clone(); caches.open(SHELL).then((c) => c.put(req, copy)); }
           return res;
