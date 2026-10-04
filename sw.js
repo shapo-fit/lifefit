@@ -1,6 +1,6 @@
 // Service worker: lets the app open without reception and loads fast.
 // Bump VERSION whenever you upload a new version, so phones pick it up.
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL = `shell-${VERSION}`;
 const RUNTIME = `runtime-${VERSION}`;
 const SHELL_FILES = [

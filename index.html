@@ -159,6 +159,10 @@ div.plan{white-space:pre-wrap;text-align:start;margin:6px 0 4px;padding:8px 10px
 .install span{font-size:13px;color:var(--muted)}
 .settings{display:flex;flex-direction:column;gap:12px}
 .pend{color:var(--yellow);font-weight:700}
+.members .dot{font-size:14px;color:var(--yellow)!important}
+.members .dot.on{color:var(--green)!important}
+.members .dot.off{color:var(--line)!important}
+.lb .score.small{font-family:var(--f-body);font-size:12px;font-weight:500;color:var(--muted);direction:rtl;text-align:left;white-space:nowrap}
 @media (prefers-reduced-motion: no-preference){.sheet{animation:up .22s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}}}
 </style>
 <style>body{margin:0;padding-top:env(safe-area-inset-top,0px)}[hidden]{display:none!important}img{max-width:100%}</style>
@@ -197,7 +201,7 @@ const FMT={time:{he:"FOR TIME",color:"var(--red)"},amrap:{he:"AMRAP",color:"var(
 const DAY=864e5;
 
 /* ---------- state ---------- */
-const S={tab:"feed",filter:"all",mode:"loading",connErr:false,sb:null,session:null,pending:0,failed:0,meId:null,meName:"",workouts:[],wods:[],names:{},db:null,user:null};
+const S={tab:"feed",filter:"all",mode:"loading",connErr:false,members:[],sb:null,session:null,pending:0,failed:0,meId:null,meName:"",workouts:[],wods:[],names:{},db:null,user:null};
 try{const t=localStorage.getItem("wb.tab");if(t)S.tab=t}catch(e){}
 
 /* ---------- dates (Israeli week: Sunday start) ---------- */
@@ -322,6 +326,29 @@ function viewFeed(){
   <div class="row" style="gap:6px" role="group" aria-label="סינון לפי סוג">${chips}</div>
   <div class="feed">${list.length?list.map(postHtml).join(""):`<div class="card empty">${S.workouts.length?"אין עדיין אימונים מהסוג הזה.":"הפיד ריק. רשום את האימון הראשון בכפתור האדום למטה."}</div>`}</div>`;
 }
+// who joined, who trained this week, who never logged — sorted by most recent activity
+function viewGroup(){
+  const wk=weekStart(Date.now());
+  const last={},weekCnt={};
+  S.workouts.forEach(w=>{
+    if(!w.pendingSync&&(!last[w.userId]||w.createdAt>last[w.userId]))last[w.userId]=w.createdAt;
+    if(w.createdAt>=wk)weekCnt[w.userId]=(weekCnt[w.userId]||0)+1;
+  });
+  const m=S.members.slice().sort((a,b)=>(last[b.id]||0)-(last[a.id]||0)||b.joinedAt-a.joinedAt);
+  const active=m.filter(x=>weekCnt[x.id]).length,never=m.filter(x=>!last[x.id]).length;
+  const row=x=>{
+    const dot=weekCnt[x.id]?"on":last[x.id]?"":"off";
+    const status=last[x.id]?`${weekCnt[x.id]?`${weekCnt[x.id]} השבוע · `:""}אחרון ${ago(last[x.id])}`:"עוד לא רשם";
+    return `<li class="${x.id===S.meId?"me-row":""}"><span class="pos dot ${dot}" aria-hidden="true">&#9679;</span><span class="who"><b>${esc(x.name)}</b><span>הצטרף ${x.joinedAt?ago(x.joinedAt):""}</span></span><span class="score small">${status}</span></li>`;
+  };
+  return `<h2 class="sec">הקבוצה</h2>
+  <div class="stats">
+    <div class="stat"><b>${m.length}</b><span>נרשמו</span></div>
+    <div class="stat"><b>${active}</b><span>רשמו אימון השבוע</span></div>
+    <div class="stat"><b>${never}</b><span>עוד לא רשמו אימון</span></div>
+  </div>
+  <div class="card">${m.length?`<ul class="lb members">${m.map(row).join("")}</ul>`:`<div class="empty">טוען את רשימת החברים…</div>`}</div>`;
+}
 function viewRank(){
   const ids=[...new Set(S.workouts.map(w=>w.userId).concat(S.meId?[S.meId]:[]))];
   const rows=ids.map(id=>({id,...pointsFor(id)})).sort((a,b)=>b.total-a.total);
@@ -334,6 +361,7 @@ function viewRank(){
     </div>
   <h2 class="sec">דירוג ${esc(month)}</h2>
   <div class="card">${rows.length?`<ol class="lb">${rows.map((r,i)=>`<li class="${r.id===S.meId?"me-row":""}"><span class="pos">${i+1}</span><span class="who"><b>${esc(nameOf(r.id))}</b><span>${r.days} ימים · ${r.weeks} שבועות מלאים · ${r.copied} העתקות</span></span><span class="score">${r.total}</span></li>`).join("")}</ol>`:`<div class="empty">אין עדיין נקודות החודש.</div>`}</div>
+  ${viewGroup()}
   <div class="card"><div style="font-weight:700;margin-bottom:6px">איך מרוויחים נקודות</div>
     <div class="rules"><b>+10</b><span>כל יום שבו נרשם אימון (פעם אחת ביום, לא משנה כמה אימונים)</span>
     <b>+5</b><span>כל חבר שעשה אימון ששיתפת (נספר פעם אחת לכל חבר ולכל אימון)</span>
@@ -376,7 +404,7 @@ function render(){
   document.querySelectorAll(".tab[data-tab]").forEach(b=>b.setAttribute("aria-current",b.dataset.tab===S.tab?"page":"false"));
   $("#myPts").textContent=S.meId?pointsFor(S.meId).total:"–";
   const people=new Set(S.workouts.map(w=>w.userId)).size;
-  $("#sub").textContent=S.mode==="loading"?"טוען…":`${people||0} מתאמנים · ${S.workouts.filter(w=>w.createdAt>=weekStart(Date.now())).length} אימונים השבוע`;
+  $("#sub").textContent=S.mode==="loading"?"טוען…":`${S.members.length||people||0} חברים · ${S.workouts.filter(w=>w.createdAt>=weekStart(Date.now())).length} אימונים השבוע`;
   const bn=$("#banner");
   const pend=S.workouts.filter(w=>w.pendingSync).length;
   if(S.failed){bn.hidden=false;bn.textContent=`${S.failed} אימונים לא נשלחו כי השרת דחה אותם. הם שמורים בטלפון. אם זה ממשיך, התנתק והתחבר מחדש.`}
@@ -683,7 +711,7 @@ async function refetch(){
     sb.from("workouts").select("*").order("created_at",{ascending:false}).limit(1000),
     sb.from("reactions").select("workout_id,user_id"),
     sb.from("wods").select("*").order("created_at",{ascending:false}).limit(20),
-    sb.from("profiles").select("id,name")
+    sb.from("profiles").select("id,name,created_at")
   ]);
   const err=w.error||r.error||d.error||p.error;
   if(err){S.connErr=isNetworkError(err)?"offline":"error";render();return}
@@ -696,8 +724,9 @@ async function refetch(){
   S.workouts=list;
   S.wods=d.data.map(x=>({id:x.id,title:x.title,description:x.description,format:x.format,cap:x.cap,createdBy:x.created_by,createdAt:Date.parse(x.created_at),weekStart:weekStart(Date.parse(x.created_at))}));
   S.names={};p.data.forEach(x=>S.names[x.id]=x.name);
+  S.members=p.data.map(x=>({id:x.id,name:x.name,joinedAt:Date.parse(x.created_at)||0}));
   S.meName=S.names[S.meId]||S.meName;
-  try{localStorage.setItem("wb.cache.v1",JSON.stringify({me:S.meId,at:Date.now(),workouts:S.workouts,wods:S.wods,names:S.names}))}catch(e){}
+  try{localStorage.setItem("wb.cache.v1",JSON.stringify({me:S.meId,at:Date.now(),workouts:S.workouts,wods:S.wods,names:S.names,members:S.members}))}catch(e){}
   S.mode="live";render();
 }
 let refetchTimer=0;
@@ -831,7 +860,7 @@ function installCard(){
   const {data}=await S.sb.auth.getSession();
   if(!data.session){showAuth("login");return}
   // show the last saved copy immediately (also works without reception), then load fresh data
-  try{const c=JSON.parse(localStorage.getItem("wb.cache.v1")||"null");if(c&&c.me===data.session.user.id){S.workouts=c.workouts;S.wods=c.wods;S.names=c.names;S.meId=c.me;S.meName=c.names[c.me]||"";S.mode="live";$("#gate").hidden=true;$("#gate").innerHTML="";$("#app").hidden=false;$("#tabs").hidden=false;render()}}catch(e){}
+  try{const c=JSON.parse(localStorage.getItem("wb.cache.v1")||"null");if(c&&c.me===data.session.user.id){S.workouts=c.workouts;S.wods=c.wods;S.names=c.names;S.members=c.members||[];S.meId=c.me;S.meName=c.names[c.me]||"";S.mode="live";$("#gate").hidden=true;$("#gate").innerHTML="";$("#app").hidden=false;$("#tabs").hidden=false;render()}}catch(e){}
   await afterSignIn(data.session);
 })();
 </script>
